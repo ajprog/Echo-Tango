@@ -1805,6 +1805,81 @@ async function loadHomeData() {
     }
 }
 
+function parseFirmwareVersion(value) {
+    const match = /^(?:TANGO-|ECHO-)?v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+)([a-z]?))?$/i.exec(value);
+    if (!match) throw new Error('Unrecognized firmware version');
+    const stages = { alpha: 0, beta: 1, rc: 2 };
+    return [Number(match[1]), Number(match[2]), Number(match[3]),
+        match[4] ? stages[match[4].toLowerCase()] : 3,
+        Number(match[5] || 0), (match[6] || '').toLowerCase()];
+}
+
+function isNewerFirmware(candidate, current) {
+    const next = parseFirmwareVersion(candidate);
+    const installed = parseFirmwareVersion(current);
+    for (let i = 0; i < next.length; i++) {
+        if (next[i] !== installed[i]) return next[i] > installed[i];
+    }
+    return false;
+}
+
+async function checkGithubFirmware(current) {
+    const model = /^(TANGO|ECHO)-/i.exec(current);
+    if (!model) throw new Error('Unknown device model');
+    parseFirmwareVersion(current);
+    const product = model[1].toLowerCase();
+    const tag = `${current.includes('-beta.') ? 'beta' : 'latest'}-${product}`;
+    const response = await fetchWithRetry(
+        `https://api.github.com/repos/Boondock-Echo/Echo-Tango/releases/tags/${tag}`,
+        { credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } }, 5000, 1);
+    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+    const release = await response.json();
+    if (release.draft || release.tag_name !== tag || !Array.isArray(release.assets)) {
+        throw new Error('Invalid GitHub release');
+    }
+    const asset = release.assets.find(item => item.name === 'firmware.bin' && item.state === 'uploaded');
+    const expectedUrl = `https://github.com/Boondock-Echo/Echo-Tango/releases/download/${tag}/firmware.bin`;
+    if (!asset || asset.browser_download_url !== expectedUrl) throw new Error('Firmware asset unavailable');
+    // Moving tags do not contain a version. Accept the published release title
+    // (e.g. "Tango v2 beta 02c") or a full model-prefixed firmware version.
+    const title = typeof release.name === 'string' ? release.name.trim() : '';
+    const shortTitle = /^(TANGO|ECHO) v(\d+) beta (\d+[a-z]?)$/i.exec(title);
+    let version;
+    if (shortTitle && shortTitle[1].toLowerCase() === product) {
+        version = `${model[1]}-v${shortTitle[2]}.0.0-beta.${shortTitle[3]}`;
+    } else if (title.toUpperCase().startsWith(`${model[1].toUpperCase()}-`)) {
+        version = title;
+    } else {
+        throw new Error('Release version unavailable');
+    }
+    parseFirmwareVersion(version);
+    if (release.prerelease && !/-alpha\.|-beta\.|-rc\./.test(current)) {
+        throw new Error('Stable release unavailable');
+    }
+    const available = isNewerFirmware(version, current);
+    return {
+        success: true,
+        upgrade_available: available,
+        download_link: expectedUrl,
+        source: 'github',
+        message: available
+            ? `${version} is available on GitHub. Download it, then upload the file under Advanced.`
+            : 'Your firmware is up to date with the GitHub release for this device.'
+    };
+}
+
+async function getFirmwareUpdateInfo() {
+    const version = document.getElementById('firmware-version');
+    try {
+        return await checkGithubFirmware(version ? version.textContent.trim() : '');
+    } catch (error) {
+        console.info('GitHub firmware check unavailable; trying device API:', error.message);
+    }
+    const response = await fetchWithRetry('/api/firmware/check', {}, 15000, 2);
+    if (!response.ok) throw new Error('Network response was not ok');
+    return response.json();
+}
+
 async function checkFirmwareUpdate() {
     const checkBtn = document.getElementById('check-firmware-btn');
     const resultDiv = document.getElementById('firmware-update-result');
@@ -1819,9 +1894,9 @@ async function checkFirmwareUpdate() {
     resultDiv.style.display = 'none';
     
     try {
-        const response = await fetchWithRetry('/api/firmware/check', {}, 15000, 2);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
+        const data = await getFirmwareUpdateInfo();
+        const applyBtn = document.getElementById('apply-firmware-btn');
+        if (applyBtn) applyBtn.style.display = data.source === 'github' ? 'none' : '';
         
         resultDiv.style.display = 'block';
         
@@ -1830,14 +1905,14 @@ async function checkFirmwareUpdate() {
             messageDiv.style.color = '#d32f2f';
             actionsDiv.style.display = 'none';
         } else if (data.upgrade_available === true && data.download_link) {
-            messageDiv.innerHTML = '<strong>Update Available!</strong><br>' + (data.message || 'A new firmware version is available.');
+            messageDiv.textContent = 'Update Available! ' + (data.message || 'A new firmware version is available.');
             messageDiv.style.color = '#2e7d32';
             actionsDiv.style.display = 'block';
             downloadLink.href = data.download_link;
             downloadLink.textContent = '\uD83D\uDCE5 Download Firmware';
             downloadLink.setAttribute('data-download-link', data.download_link);
         } else {
-            messageDiv.innerHTML = '<strong>Up to Date</strong><br>' + (data.message || 'Your device is running the latest firmware version.');
+            messageDiv.textContent = 'Up to Date. ' + (data.message || 'Your device is running the latest firmware version.');
             messageDiv.style.color = '#1976d2';
             actionsDiv.style.display = 'none';
         }

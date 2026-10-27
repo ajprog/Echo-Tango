@@ -359,11 +359,6 @@ bool handleUploadOne()
     {
         logInfof("[UploadTask] SD upload success: %s", request.path);
 
-        if (!uploadQueue_markUploaded(request.path))
-        {
-            logWarnf("[UploadTask] Failed to move file to /inbox: %s", request.path);
-        }
-
         fsFallbackRetryPath[0] = '\0';
         fsFallbackRetryCount = 0;
         lastWarnedFilePath[0] = '\0';
