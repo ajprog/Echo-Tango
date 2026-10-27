@@ -24,6 +24,7 @@
 #include <freertos/semphr.h>
 #include <esp_task_wdt.h>
 #include "logger.h"
+#include "health_performance.h"
 #if defined(ECHO)
 #include "mqtt_task.h"
 #endif
@@ -6283,6 +6284,7 @@ void settings_processSerial()
                     {
                         health_loadYearlySummary();
                         sendHealthMessage(true);
+                        health_performance_print(Serial);
                         cliOk();
                     }
                     else

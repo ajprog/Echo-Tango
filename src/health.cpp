@@ -17,6 +17,7 @@
 #include "settings.h"
 #include "main.h"
 #include "networkHandller.h"
+#include "health_performance.h"
 
 // Global metrics
 SystemHealthMetrics g_healthMetrics = {};
@@ -295,6 +296,8 @@ void maintenanceTask(void *pvParameters)
             system_requestGracefulReboot("cloud_path_60min");
         }
         
+        health_performance_sample();
+
         // Health check (every 30 seconds)
         if (now - lastHealthCheckMs >= kHealthCheckIntervalMs)
         {

@@ -72,14 +72,14 @@ bool handleUploadOne()
         return false;
     }
 
-    // 🔹 Credentials check
+    // Credentials check
     if (!network_hasAnyWiFiCredentials())
     {
         logDebugf("[UploadTask] skip reason=no_credentials");
         return false;
     }
 
-    // 🔹 WiFi check
+    // WiFi check
     if (!isWiFiConnected())
     {
         logDebugf("[UploadTask] skip reason=wifi");
@@ -253,6 +253,13 @@ bool handleUploadOne()
     if (now < nextFsFallbackScanAllowedMs)
     {
         logDebugf("[UploadTask] upload_list scan deferred");
+        return false;
+    }
+
+    // The in-memory counter is initialized at boot and updated with queue changes.
+    // Avoid repeatedly walking /pending while the queue is empty.
+    if (uploadQueue_getPendingCount() == 0)
+    {
         return false;
     }
 
